@@ -31,7 +31,7 @@ const mainKeyboard = Markup.keyboard([
   ["💬 Задати питання адміну"],
 ]).resize();
 
-coffeeHandler(bot, userStates);
+coffeeHandler(bot, userStates, notifyAdmin);
 
 bot.start(async (ctx) => {
   try {
