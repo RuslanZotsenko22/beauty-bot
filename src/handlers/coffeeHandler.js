@@ -1,10 +1,9 @@
 import { Markup } from "telegraf";
-import { notifyAdmin } from "../services/notifyAdmin.js";
 import { User } from "../models/User.js";
 
 const coffeeTempState = new Map();
 
-export function coffeeHandler(bot, userStates) {
+export function coffeeHandler(bot, userStates, notifyAdmin) {
   bot.hears(/замовити\s*каву/i, async (ctx) => {
     console.log("🔥 Кнопка кави натиснута:", ctx.message.text);
     userStates.delete(ctx.from.id);
@@ -103,12 +102,14 @@ export function coffeeHandler(bot, userStates) {
     await ctx.editMessageText(finalText);
 
     if (user) {
-      notifyAdmin(
-        `${user.firstName} (${user.phoneNumber}) замовив(ла) ${coffeeData.type} (${coffeeData.size}, ${coffeeData.sugar})`
+      await notifyAdmin(
+        bot,
+        `☕ ${user.firstName} (${user.phoneNumber}) замовив(ла) ${coffeeData.type} (${coffeeData.size}, ${coffeeData.sugar})`
       );
     } else {
-      notifyAdmin(
-        `${ctx.from.first_name} замовив(ла) ${coffeeData.type} (${coffeeData.size}, ${coffeeData.sugar}) (номер невідомий)`
+      await notifyAdmin(
+        bot,
+        `☕ ${ctx.from.first_name} замовив(ла) ${coffeeData.type} (${coffeeData.size}, ${coffeeData.sugar}) (номер невідомий)`
       );
     }
 
