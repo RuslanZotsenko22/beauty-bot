@@ -31,7 +31,6 @@ const mainKeyboard = Markup.keyboard([
   ["💬 Задати питання адміну"],
 ]).resize();
 
-// ☕ Підключення кавового обробника ДО обробника тексту
 coffeeHandler(bot, userStates);
 
 bot.start(async (ctx) => {
@@ -82,6 +81,7 @@ bot.hears("📞 Викликати адміністратора", async (ctx) =>
 
     if (user) {
       await notifyAdmin(
+        bot,
         `📞 ${user.firstName} (${user.phoneNumber}) викликав адміністратора`
       );
     }
@@ -210,6 +210,7 @@ bot.action(/time_(\d{2})(\d{2})/, async (ctx) => {
 
     if (user) {
       await notifyAdmin(
+        bot,
         `🧾 ${user.firstName} (${user.phoneNumber}) записався на ${coffeeData.procedure} о ${timeStr}`
       );
     }
@@ -229,6 +230,7 @@ bot.on("text", async (ctx) => {
 
       if (user) {
         await notifyAdmin(
+          bot,
           `❓ ${user.firstName} (${user.phoneNumber}) задав(ла) питання:\n"${question}"`
         );
       }

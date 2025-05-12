@@ -1,8 +1,17 @@
-import { Telegraf } from "telegraf";
-import { BOT_TOKEN, ADMIN_CHAT_ID } from "../config/env.js";
+export async function notifyAdmin(bot, message) {
+  const ADMIN_CHAT_ID = process.env.ADMIN_CHAT_ID;
 
-const bot = new Telegraf(BOT_TOKEN);
+  if (!ADMIN_CHAT_ID) {
+    console.error("❌ ADMIN_CHAT_ID не задано в .env");
+    return;
+  }
 
-export function notifyAdmin(message) {
-  bot.telegram.sendMessage(ADMIN_CHAT_ID, `☕ ${message}`);
+  try {
+    await bot.telegram.sendMessage(ADMIN_CHAT_ID, message);
+  } catch (err) {
+    console.error(
+      "❌ Не вдалося надіслати повідомлення адміну:",
+      err.description || err.message || err
+    );
+  }
 }
