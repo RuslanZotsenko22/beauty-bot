@@ -22,8 +22,6 @@ try {
 }
 
 const userStates = new Map();
-const coffeeTempState = new Map();
-const availableTimes = ["10:00", "11:00", "12:00", "14:00", "15:00", "16:00"];
 
 const mainKeyboard = Markup.keyboard([
   ["☕ Замовити каву", "📝 Записатись на процедуру"],
@@ -32,21 +30,6 @@ const mainKeyboard = Markup.keyboard([
 ]).resize();
 
 coffeeHandler(bot, userStates, notifyAdmin);
-
-function getNextThreeDates() {
-  const dates = [];
-  const options = { day: "numeric", month: "long" };
-  const today = new Date();
-
-  for (let i = 0; i < 3; i++) {
-    const future = new Date();
-    future.setDate(today.getDate() + i);
-    const formatted = future.toLocaleDateString("uk-UA", options);
-    const iso = future.toISOString().split("T")[0];
-    dates.push({ label: formatted, value: iso });
-  }
-  return dates;
-}
 
 bot.start(async (ctx) => {
   try {
@@ -118,9 +101,9 @@ bot.hears("💬 Задати питання адміну", async (ctx) => {
   }
 });
 
+// Додано обробку текстової кнопки "Записатись на процедуру"
 bot.hears("📝 Записатись на процедуру", async (ctx) => {
   try {
-    userStates.set(ctx.from.id, "awaiting_procedure_selection");
     await ctx.reply(
       "🧾 Оберіть процедуру:",
       Markup.inlineKeyboard([
@@ -135,132 +118,35 @@ bot.hears("📝 Записатись на процедуру", async (ctx) => {
   }
 });
 
-bot.hears("📅 Мої записи", async (ctx) => {
+bot.action(/cancel_(.+)/, async (ctx) => {
   try {
+    const id = ctx.match[1];
     const telegramId = ctx.from.id;
-    const appointments = await Appointment.find({ telegramId });
-
-    if (appointments.length === 0) {
-      return await ctx.reply("📭 У вас немає записів.");
-    }
-
-    let response = "📋 Ваші записи:\n\n";
-    appointments.forEach((a, i) => {
-      response += `${i + 1}. ${a.procedure} — ${a.date} о ${a.time}\n`;
-    });
-
-    await ctx.reply(response);
-  } catch (err) {
-    console.error("❌ fetch appointments error:", err.description || err);
-  }
-});
-
-bot.action(/procedure_(.+)/, async (ctx) => {
-  try {
-    const telegramId = ctx.from.id;
-    const selectionMap = {
-      massage: "Масаж",
-      cleaning: "Чистка",
-      btl: "БТЛ",
-      endosphere: "Ендосфера",
-    };
-
-    const chosenKey = ctx.match[1];
-    const procedureName = selectionMap[chosenKey] || "Процедура";
-
-    coffeeTempState.set(telegramId, { procedure: procedureName });
-    userStates.set(telegramId, "awaiting_date_selection");
-
-    await ctx.answerCbQuery();
-    await ctx.editMessageText(`✅ Ви обрали: ${procedureName}`);
-
-    const dates = getNextThreeDates();
-    const buttons = dates.map((d) => [
-      Markup.button.callback(d.label, `date_${d.value}`),
-    ]);
-
-    await ctx.reply("📅 Оберіть дату:", Markup.inlineKeyboard(buttons));
-  } catch (err) {
-    console.error("❌ procedure action error:", err.description || err);
-  }
-});
-
-bot.action(/date_(\d{4}-\d{2}-\d{2})/, async (ctx) => {
-  try {
-    const telegramId = ctx.from.id;
-    const selectedDate = ctx.match[1];
-    const coffeeData = coffeeTempState.get(telegramId);
-
-    if (!coffeeData || !coffeeData.procedure) {
-      return await ctx.reply("😕 Щось пішло не так. Почніть знову.");
-    }
-
-    coffeeData.date = selectedDate;
-    coffeeTempState.set(telegramId, coffeeData);
-
-    const timeButtons = availableTimes.map((t) => [
-      Markup.button.callback(t, `time_${t.replace(":", "")}`),
-    ]);
-
-    await ctx.answerCbQuery();
-    await ctx.editMessageText(`📅 Ви обрали дату: ${selectedDate}`);
-    await ctx.reply(
-      "🕒 Оберіть бажаний час:",
-      Markup.inlineKeyboard(timeButtons)
-    );
-  } catch (err) {
-    console.error("❌ date selection error:", err.description || err);
-  }
-});
-
-bot.action(/time_(\d{2})(\d{2})/, async (ctx) => {
-  try {
-    const telegramId = ctx.from.id;
+    const appointment = await Appointment.findById(id);
     const user = await User.findOne({ telegramId });
-    const coffeeData = coffeeTempState.get(telegramId);
 
-    if (!coffeeData || !coffeeData.procedure || !coffeeData.date) {
-      return await ctx.reply("😕 Щось пішло не так. Почніть знову.");
+    if (!appointment) {
+      await ctx.answerCbQuery();
+      return ctx.editMessageText("⚠️ Запис не знайдено або вже скасовано.");
     }
 
-    const timeStr = `${ctx.match[1]}:${ctx.match[2]}`;
-    const date = coffeeData.date;
-
-    const existing = await Appointment.findOne({
-      procedure: coffeeData.procedure,
-      date,
-      time: timeStr,
-    });
-
+    await Appointment.findByIdAndDelete(id);
     await ctx.answerCbQuery();
+    await ctx.editMessageText("❌ Запис скасовано.");
 
-    if (existing) {
-      return await ctx.reply("❌ Цей час уже зайнятий. Оберіть інший.");
-    }
+    const message = `🚫 ${
+      user ? `${user.firstName} (${user.phoneNumber})` : ctx.from.first_name
+    } скасував(ла) запис на ${appointment.procedure} — ${appointment.date} о ${
+      appointment.time
+    }`;
 
-    const newAppointment = new Appointment({
-      telegramId,
-      procedure: coffeeData.procedure,
-      date,
-      time: timeStr,
-    });
-
-    await newAppointment.save();
-    coffeeTempState.delete(telegramId);
-    userStates.delete(telegramId);
-
-    await ctx.editMessageText(
-      `✅ Ви записались на ${coffeeData.procedure} — ${date} о ${timeStr}`
-    );
-
-    if (user) {
-      await notifyAdmin(
-        bot,
-        `🧾 ${user.firstName} (${user.phoneNumber}) записався на ${coffeeData.procedure} — ${date} о ${timeStr}`
-      );
+    try {
+      await notifyAdmin(bot, message);
+    } catch (adminError) {
+      console.error("❌ notifyAdmin error:", adminError);
     }
   } catch (err) {
-    console.error("❌ time selection error:", err.description || err);
+    console.error("❌ cancel single error:", err.description || err);
   }
 });
 

@@ -190,9 +190,30 @@ export function coffeeHandler(bot, userStates, notifyAdmin) {
 
   bot.action(/cancel_(.+)/, async (ctx) => {
     const id = ctx.match[1];
+    const telegramId = ctx.from.id;
+
+    const appointment = await Appointment.findById(id);
+    const user = await User.findOne({ telegramId });
+
+    if (!appointment) {
+      await ctx.answerCbQuery();
+      return ctx.editMessageText("⚠️ Запис не знайдено або вже скасовано.");
+    }
+
     await Appointment.findByIdAndDelete(id);
     await ctx.answerCbQuery();
     await ctx.editMessageText("❌ Запис скасовано.");
+
+    const message = `🚫 ${
+      user ? `${user.firstName} (${user.phoneNumber})` : ctx.from.first_name
+    } скасував(ла) запис на ${appointment.procedure} — ${appointment.date} о ${
+      appointment.time
+    }`;
+    try {
+      await notifyAdmin(bot, message);
+    } catch (err) {
+      console.error("❌ notifyAdmin error:", err);
+    }
   });
 
   // ✅ Дата для процедури
