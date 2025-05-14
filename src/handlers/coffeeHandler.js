@@ -1,7 +1,24 @@
 import { Markup } from "telegraf";
 import { User } from "../models/User.js";
+import { Appointment } from "../models/Appointment.js";
 
 const coffeeTempState = new Map();
+const procedureTempState = new Map();
+
+function getNextThreeDates() {
+  const dates = [];
+  const options = { day: "numeric", month: "long" };
+  const today = new Date();
+
+  for (let i = 0; i < 3; i++) {
+    const future = new Date();
+    future.setDate(today.getDate() + i);
+    const formatted = future.toLocaleDateString("uk-UA", options);
+    const iso = future.toISOString().split("T")[0];
+    dates.push({ label: formatted, value: iso });
+  }
+  return dates;
+}
 
 export function coffeeHandler(bot, userStates, notifyAdmin) {
   bot.hears(/замовити\s*каву/i, async (ctx) => {
@@ -118,6 +135,159 @@ export function coffeeHandler(bot, userStates, notifyAdmin) {
     setTimeout(() => {
       ctx.telegram.sendMessage(ctx.chat.id, `☕ Ваша кава вже в дорозі!`);
     }, 60 * 1000);
+  });
+
+  // Перегляд і скасування записів
+  bot.hears("📅 Мої записи", async (ctx) => {
+    const telegramId = ctx.from.id;
+    const appointments = await Appointment.find({ telegramId });
+
+    if (appointments.length === 0) {
+      return await ctx.reply("📭 У вас немає записів.");
+    }
+
+    let response = "📋 Ваші записи:\n\n";
+    appointments.forEach((a, i) => {
+      response += `${i + 1}. ${a.procedure} — ${a.time}\n`;
+    });
+
+    const buttons = [
+      [Markup.button.callback("❌ Скасувати запис", "cancel_single")],
+      [Markup.button.callback("❌ Скасувати всі записи", "cancel_all")],
+    ];
+
+    await ctx.reply(response, Markup.inlineKeyboard(buttons));
+  });
+
+  bot.action("cancel_all", async (ctx) => {
+    const telegramId = ctx.from.id;
+    await Appointment.deleteMany({ telegramId });
+    await ctx.answerCbQuery();
+    await ctx.editMessageText("🗑️ Всі записи скасовано.");
+  });
+
+  bot.action("cancel_single", async (ctx) => {
+    const telegramId = ctx.from.id;
+    const appointments = await Appointment.find({ telegramId });
+
+    if (appointments.length === 0) {
+      return ctx.reply("📭 У вас немає записів для скасування.");
+    }
+
+    const buttons = appointments.map((a) => [
+      Markup.button.callback(
+        `${a.procedure} — ${a.time}`,
+        `cancel_${a._id.toString()}`
+      ),
+    ]);
+
+    await ctx.answerCbQuery();
+    return ctx.reply(
+      "❌ Оберіть запис для скасування:",
+      Markup.inlineKeyboard(buttons)
+    );
+  });
+
+  bot.action(/cancel_(.+)/, async (ctx) => {
+    const id = ctx.match[1];
+    await Appointment.findByIdAndDelete(id);
+    await ctx.answerCbQuery();
+    await ctx.editMessageText("❌ Запис скасовано.");
+  });
+
+  // ✅ Дата для процедури
+  bot.action(/procedure_(.+)/, async (ctx) => {
+    const chosenKey = ctx.match[1];
+    const procedureMap = {
+      massage: "Масаж",
+      cleaning: "Чистка",
+      btl: "БТЛ",
+      endosphere: "Ендосфера",
+    };
+    const procedure = procedureMap[chosenKey] || "Процедура";
+    const telegramId = ctx.from.id;
+
+    procedureTempState.set(telegramId, { procedure });
+
+    await ctx.answerCbQuery();
+    await ctx.editMessageText(`✅ Ви обрали: ${procedure}`);
+
+    const dates = getNextThreeDates();
+    const buttons = dates.map((d) => [
+      Markup.button.callback(d.label, `procdate_${d.value}`),
+    ]);
+
+    await ctx.telegram.sendMessage(
+      ctx.chat.id,
+      "📅 Оберіть дату:",
+      Markup.inlineKeyboard(buttons)
+    );
+  });
+
+  bot.action(/procdate_(\d{4}-\d{2}-\d{2})/, async (ctx) => {
+    const date = ctx.match[1];
+    const telegramId = ctx.from.id;
+    const data = procedureTempState.get(telegramId);
+
+    if (!data) return ctx.reply("Щось пішло не так. Спробуйте ще раз.");
+
+    data.date = date;
+    procedureTempState.set(telegramId, data);
+
+    const times = ["10:00", "11:00", "12:00", "14:00", "15:00", "16:00"];
+    const buttons = times.map((t) => [
+      Markup.button.callback(t, `proctime_${t.replace(":", "")}`),
+    ]);
+
+    await ctx.answerCbQuery();
+    await ctx.editMessageText(`📅 Ви обрали дату: ${date}`);
+    await ctx.telegram.sendMessage(
+      ctx.chat.id,
+      "🕒 Оберіть час:",
+      Markup.inlineKeyboard(buttons)
+    );
+  });
+
+  bot.action(/proctime_(\d{2})(\d{2})/, async (ctx) => {
+    const hour = ctx.match[1];
+    const minute = ctx.match[2];
+    const time = `${hour}:${minute}`;
+    const telegramId = ctx.from.id;
+    const user = await User.findOne({ telegramId });
+    const data = procedureTempState.get(telegramId);
+
+    if (!data || !data.procedure || !data.date) {
+      return ctx.reply("Щось пішло не так. Спробуйте ще раз.");
+    }
+
+    const existing = await Appointment.findOne({ date: data.date, time });
+
+    await ctx.answerCbQuery();
+
+    if (existing) {
+      return ctx.reply("❌ Цей час уже зайнятий. Оберіть інший.");
+    }
+
+    const newAppointment = new Appointment({
+      telegramId,
+      procedure: data.procedure,
+      date: data.date,
+      time,
+    });
+
+    await newAppointment.save();
+    procedureTempState.delete(telegramId);
+
+    await ctx.editMessageText(
+      `✅ Ви записались на ${data.procedure} — ${data.date} о ${time}`
+    );
+
+    if (user) {
+      await notifyAdmin(
+        bot,
+        `🧾 ${user.firstName} (${user.phoneNumber}) записався на ${data.procedure} — ${data.date} о ${time}`
+      );
+    }
   });
 }
 
