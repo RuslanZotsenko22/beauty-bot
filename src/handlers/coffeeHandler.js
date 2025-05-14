@@ -148,7 +148,7 @@ export function coffeeHandler(bot, userStates, notifyAdmin) {
 
     let response = "📋 Ваші записи:\n\n";
     appointments.forEach((a, i) => {
-      response += `${i + 1}. ${a.procedure} — ${a.time}\n`;
+      response += `${i + 1}. ${a.procedure} — ${a.date} о ${a.time}\n`;
     });
 
     const buttons = [
@@ -260,7 +260,11 @@ export function coffeeHandler(bot, userStates, notifyAdmin) {
       return ctx.reply("Щось пішло не так. Спробуйте ще раз.");
     }
 
-    const existing = await Appointment.findOne({ date: data.date, time });
+    const existing = await Appointment.findOne({
+      date: data.date,
+      time,
+      procedure: data.procedure,
+    });
 
     await ctx.answerCbQuery();
 
